@@ -106,7 +106,7 @@ Add the required database plugins to your Railway project:
 
 ### 3. Set environment variables on the service
 
-In the `DB-Provisioner` service **Variables** tab:
+See [`env.provisioner.example`](env.provisioner.example) for the full list. In the `DB-Provisioner` service **Variables** tab:
 
 | Variable                                    | Value                                               |
 | ------------------------------------------- | --------------------------------------------------- |
@@ -122,7 +122,7 @@ The provisioner uses `RAILWAY_SERVICE_NAME` to generate Railway variable referen
 
 ### 5. CI pipeline
 
-In **your** consuming repo, add a workflow (e.g. `.github/workflows/provision-databases.yml`) that runs the CI Docker image against your `services.txt`:
+In **your** consuming repo, add a workflow (e.g. `.github/workflows/provision-databases.yml`) that runs the CI Docker image against your `services.txt`. See [`env.ci.example`](env.ci.example) for the required environment variables.
 
 ```yaml
 name: Provision Databases
@@ -191,7 +191,7 @@ Published to GHCR on every `v*` tag push. Each release produces three tags:
 | -------- | ----------------------------------- |
 | `latest` | Most recent release                 |
 | `<sha>`  | Commit SHA the image was built from |
-| `vX.Y` | The git tag (e.g. `v1.0`)         |
+| `vX.Y`   | The git tag (e.g. `v1.0`)           |
 
 Pin to a specific version tag in production; use `latest` for experimentation.
 
@@ -225,6 +225,8 @@ railway-DB-Provisioner/
 │   ├── Dockerfile               # Provisioner base image (Railway)
 │   └── Dockerfile.ci            # CI image (GitHub/GitLab pipelines)
 ├── services.example.txt         # Example service declarations (copy to services.txt)
+├── env.provisioner.example      # Env vars for the provisioner service (Railway)
+├── env.ci.example               # Env vars for the CI pipeline (GitHub Actions / GitLab CI)
 ├── ci-entrypoint.sh             # CI entrypoint (ci-setup + railway up)
 ├── .dockerignore
 ├── .gitignore
