@@ -148,14 +148,25 @@ func extractHost(rawURL string) (string, error) {
 
 // generatePassword returns a cryptographically secure alphanumeric string.
 // Alphanumeric only: never needs quoting/escaping in SQL or URLs.
+// Uses rejection sampling to eliminate modulo bias.
 func generatePassword(length int) (string, error) {
 	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	const charsLen = byte(len(chars))
+	// max is the largest multiple of charsLen that fits in a byte.
+	// Values >= max are rejected and re-rolled to avoid modulo bias.
+	const max = byte(256 - (256 % int(charsLen)))
+
 	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	for i := range buf {
-		buf[i] = chars[buf[i]%byte(len(chars))]
+	for i := 0; i < length; {
+		var randBuf [1]byte
+		if _, err := rand.Read(randBuf[:]); err != nil {
+			return "", err
+		}
+		if randBuf[0] >= max {
+			continue
+		}
+		buf[i] = chars[randBuf[0]%charsLen]
+		i++
 	}
 	return string(buf), nil
 }

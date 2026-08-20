@@ -38,6 +38,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Test
+        run: go test ./...
+
   publish:
     name: Build and publish Docker images
     runs-on: ubuntu-latest
