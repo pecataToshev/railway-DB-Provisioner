@@ -1,0 +1,23 @@
+name: Write build info
+description: Generates internal/buildinfo/buildinfo.go with commit, build time and source from the workflow context.
+
+runs:
+  using: composite
+  steps:
+    - name: Write build info
+      shell: sh
+      run: |
+        cat << EOF > internal/buildinfo/buildinfo.go
+        package buildinfo
+
+        const (
+          Commit    = "$(echo ${{ github.sha }} | cut -c1-7)"
+          BuildTime = "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          Source    = "${{ github.ref_name }}"
+        )
+        EOF
+
+        echo "Generated buildinfo.go:"
+        echo ----------------------------
+        cat internal/buildinfo/buildinfo.go
+        echo ----------------------------

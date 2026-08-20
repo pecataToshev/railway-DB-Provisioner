@@ -1,0 +1,17 @@
+# Docker build context — exclude everything not needed for the Go build.
+# Keeps the context small and prevents irrelevant changes from busting the
+# `go mod download` cache layer.
+
+.git
+.github
+.gitignore
+
+# Docs / metadata
+*.md
+LICENSE
+
+# Consumer-specific (not in this repo, but guard against local dev)
+services.txt
+
+# OS / editor
+.DS_Store

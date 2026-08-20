@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build and vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Write build info
+        uses: ./.github/actions/write-buildinfo
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  publish:
+    name: Build and publish Docker images
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Write build info
+        uses: ./.github/actions/write-buildinfo
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push provisioner image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/pecatatoshev/railway-db-provisioner:latest
+            ghcr.io/pecatatoshev/railway-db-provisioner:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('ghcr.io/pecatatoshev/railway-db-provisioner:{0}', github.ref_name) || '' }}
+
+      - name: Build and push CI image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.ci
+          push: true
+          tags: |
+            ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
+            ghcr.io/pecatatoshev/railway-db-provisioner-ci:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('ghcr.io/pecatatoshev/railway-db-provisioner-ci:{0}', github.ref_name) || '' }}

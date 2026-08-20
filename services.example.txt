@@ -1,0 +1,10 @@
+# List of services to provision — one entry per line.
+# Format: DB_TYPE:SERVICE_PREFIX
+# DB_TYPE can be POSTGRES
+#
+# For each entry a single Railway variable must be set:
+#   <PREFIX>_<DB_TYPE>_URL   e.g. postgresql://quizzer_user:pass@postgres.railway.internal:5432/quizzer_db
+#
+# Lines starting with # and blank lines are ignored.
+
+POSTGRES:EXAMPLE_SERVICE

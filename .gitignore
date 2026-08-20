@@ -1,0 +1,10 @@
+# Binaries
+/provisioner
+/ci-setup
+*.exe
+
+# Go
+/vendor/
+
+# OS
+.DS_Store

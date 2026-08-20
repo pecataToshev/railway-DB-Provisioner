@@ -1,0 +1,23 @@
+# CI image — used in GitHub Actions / GitLab CI pipelines.
+# Contains the ci-setup binary, the Railway CLI, and the entrypoint script.
+# Build context: repo root
+#   docker build -f docker/Dockerfile.ci -t railway-db-provisioner-ci .
+
+FROM golang:1.26-alpine3.24 AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /ci-setup ./cmd/ci-setup
+
+FROM alpine:3.24
+RUN apk add --no-cache ca-certificates curl bash
+WORKDIR /repo
+COPY --from=builder /ci-setup /usr/local/bin/ci-setup
+COPY ci-entrypoint.sh /usr/local/bin/ci-entrypoint.sh
+
+# Install Railway CLI via the official installer.
+# Pinned to RAILWAY_BIN_DIR=/usr/local/bin so `railway` is on PATH.
+RUN bash -c "$(curl -fsSL https://railway.com/install.sh)" -- -y -b /usr/local/bin
+
+ENTRYPOINT ["ci-entrypoint.sh"]
