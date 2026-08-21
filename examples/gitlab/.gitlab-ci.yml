@@ -1,0 +1,25 @@
+# GitLab CI configuration for database provisioning.
+#
+# Required CI/CD variables (Settings → CI/CD → Variables):
+#   RAILWAY_TOKEN — Railway API token (https://railway.com/account/tokens)
+#   Mark as "Masked" and "Protected".
+
+stages:
+  - provision
+
+provision-databases:
+  stage: provision
+  image: ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
+  variables:
+    RAILWAY_TOKEN: $RAILWAY_TOKEN
+    RAILWAY_SERVICE_NAME: DB-Provisioner
+  script:
+    - ci-entrypoint.sh
+  rules:
+    # Run on main branch when services.txt or the CI config changes
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
+      changes:
+        - services.txt
+        - .gitlab-ci.yml
+    # Allow manual trigger from the GitLab UI
+    - if: $CI_PIPELINE_SOURCE == "web"

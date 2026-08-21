@@ -1,0 +1,6 @@
+# List of services to provision — one entry per line.
+# Format: DB_TYPE:SERVICE_PREFIX
+# See https://github.com/pecataToshev/railway-DB-Provisioner for full docs.
+
+POSTGRES:AUTH
+POSTGRES:QUIZZER

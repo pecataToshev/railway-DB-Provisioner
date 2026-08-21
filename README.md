@@ -63,7 +63,7 @@ The run is fully **idempotent**: safe to run repeatedly. Passwords are synced on
 
 ## Adding a service
 
-In your consuming repo, create `services.txt` (based on [`services.example.txt`](services.example.txt)) and add the prefix:
+In your consuming repo, create `services.txt` (based on [`services.example.txt`](https://github.com/pecataToshev/railway-DB-Provisioner/blob/main/services.example.txt)) and add the prefix:
 
 ```
 POSTGRES:QUIZZER
@@ -106,7 +106,7 @@ Add the required database plugins to your Railway project:
 
 ### 3. Set environment variables on the service
 
-See [`env.provisioner.example`](env.provisioner.example) for the full list. In the `DB-Provisioner` service **Variables** tab:
+See [`env.provisioner.example`](https://github.com/pecataToshev/railway-DB-Provisioner/blob/main/env.provisioner.example) for the full list. In the `DB-Provisioner` service **Variables** tab:
 
 | Variable                                    | Value                                               |
 | ------------------------------------------- | --------------------------------------------------- |
@@ -122,44 +122,12 @@ The provisioner uses `RAILWAY_SERVICE_NAME` to generate Railway variable referen
 
 ### 5. CI pipeline
 
-In **your** consuming repo, add a workflow (e.g. `.github/workflows/provision-databases.yml`) that runs the CI Docker image against your `services.txt`. See [`env.ci.example`](env.ci.example) for the required environment variables.
+In **your** consuming repo, add a CI workflow that runs the CI Docker image against your `services.txt`. See [`env.ci.example`](https://github.com/pecataToshev/railway-DB-Provisioner/blob/main/env.ci.example) for the required environment variables.
 
-```yaml
-name: Provision Databases
-on:
-  push:
-    branches: [main]
-    paths: ["services.txt", ".github/workflows/provision-databases.yml"]
-  workflow_dispatch:
+Example consumer repos are provided in the [`examples/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples) directory — each contains a complete setup with `services.txt`, `Dockerfile`, CI config, and a README:
 
-jobs:
-  provision:
-    runs-on: ubuntu-latest
-    env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_SERVICE_NAME: DB-Provisioner
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          docker run --rm \
-            -e RAILWAY_TOKEN \
-            -e RAILWAY_SERVICE_NAME \
-            -v "$PWD:/repo" \
-            -w /repo \
-            ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
-```
-
-For **GitLab CI**, the equivalent step:
-
-```yaml
-provision-databases:
-  image: ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
-  variables:
-    RAILWAY_TOKEN: $RAILWAY_TOKEN
-    RAILWAY_SERVICE_NAME: DB-Provisioner
-  script:
-    - ci-entrypoint.sh
-```
+- **GitHub Actions**: [`examples/github/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples/github) → copy into your GitHub repo
+- **GitLab CI**: [`examples/gitlab/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples/gitlab) → copy into your GitLab repo
 
 ### 6. Enjoy
 
@@ -224,6 +192,19 @@ railway-DB-Provisioner/
 ├── docker/
 │   ├── Dockerfile               # Provisioner base image (Railway)
 │   └── Dockerfile.ci            # CI image (GitHub/GitLab pipelines)
+├── examples/
+│   ├── github/                  # Complete GitHub Actions consumer example
+│   │   ├── .github/workflows/
+│   │   ├── Dockerfile
+│   │   ├── railway.json
+│   │   ├── services.txt
+│   │   └── README.md
+│   └── gitlab/                  # Complete GitLab CI consumer example
+│       ├── .gitlab-ci.yml
+│       ├── Dockerfile
+│       ├── railway.json
+│       ├── services.txt
+│       └── README.md
 ├── services.example.txt         # Example service declarations (copy to services.txt)
 ├── env.provisioner.example      # Env vars for the provisioner service (Railway)
 ├── env.ci.example               # Env vars for the CI pipeline (GitHub Actions / GitLab CI)
