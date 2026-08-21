@@ -14,6 +14,8 @@ provision-databases:
   variables:
     RAILWAY_SERVICE_NAME: DB-Provisioner
     SERVICES_FILE: $CI_PROJECT_DIR/services.txt
+  script:
+    - ci-entrypoint.sh
   rules:
     # Run on main branch when services.txt or the CI config changes
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
