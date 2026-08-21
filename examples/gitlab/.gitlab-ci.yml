@@ -9,11 +9,17 @@ stages:
 
 provision-databases:
   stage: provision
-  image: ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
+  image:
+    name: ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
+    # Override the entrypoint — GitLab runs scripts from CI_PROJECT_DIR,
+    # not the image's WORKDIR (/repo). We run the entrypoint manually
+    # from the cloned repo so both ci-setup and `railway up` find the files.
+    entrypoint: [""]
   variables:
     RAILWAY_TOKEN: $RAILWAY_TOKEN
     RAILWAY_SERVICE_NAME: DB-Provisioner
   script:
+    - cd "$CI_PROJECT_DIR"
     - ci-entrypoint.sh
   rules:
     # Run on main branch when services.txt or the CI config changes

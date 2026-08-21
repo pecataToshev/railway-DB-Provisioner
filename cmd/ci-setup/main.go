@@ -35,10 +35,16 @@ func main() {
 	// Text handler for CI — human-readable in pipeline console output.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 
+	servicesPath := os.Getenv("SERVICES_FILE")
+	if servicesPath == "" {
+		servicesPath = "services.txt"
+	}
+
 	slog.Info("ci-setup starting",
 		"commit", buildinfo.Commit,
 		"build_time", buildinfo.BuildTime,
-		"source", buildinfo.Source)
+		"source", buildinfo.Source,
+		"servicesPath", servicesPath)
 
 	token := os.Getenv("RAILWAY_TOKEN")
 	if token == "" {
@@ -50,11 +56,6 @@ func main() {
 	if serviceName == "" {
 		slog.Error("RAILWAY_SERVICE_NAME not set")
 		os.Exit(1)
-	}
-
-	servicesPath := os.Getenv("SERVICES_FILE")
-	if servicesPath == "" {
-		servicesPath = "services.txt"
 	}
 
 	content, err := os.ReadFile(servicesPath)

@@ -9,6 +9,7 @@ This is a complete example of a consuming repository that uses
 | ---------------- | ------------------------------------------------------- |
 | `services.txt`   | Declare which services need a database                  |
 | `Dockerfile`     | Extends the provisioner base image, adds `services.txt` |
+| `railway.json`   | Railway build + deploy config (one-shot, never restart) |
 | `.gitlab-ci.yml` | CI pipeline that runs the CI image                      |
 
 ## Setup

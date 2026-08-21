@@ -44,16 +44,18 @@ func main() {
 		},
 	})))
 
-	slog.Info("db-provisioner starting",
-		"commit", buildinfo.Commit,
-		"build_time", buildinfo.BuildTime,
-		"source", buildinfo.Source)
-
 	// Read services.txt
 	servicesPath := os.Getenv("SERVICES_FILE")
 	if servicesPath == "" {
 		servicesPath = "services.txt"
 	}
+
+	slog.Info("db-provisioner starting",
+		"commit", buildinfo.Commit,
+		"build_time", buildinfo.BuildTime,
+		"source", buildinfo.Source,
+		"servicesPath", servicesPath)
+
 	content, err := os.ReadFile(servicesPath)
 	if err != nil {
 		slog.Error("failed to read services file", "path", servicesPath, "error", err)

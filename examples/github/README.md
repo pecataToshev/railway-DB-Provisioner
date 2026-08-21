@@ -9,6 +9,7 @@ This is a complete example of a consuming repository that uses
 | ------------------------------------------- | ------------------------------------------------------- |
 | `services.txt`                              | Declare which services need a database                  |
 | `Dockerfile`                                | Extends the provisioner base image, adds `services.txt` |
+| `railway.json`                              | Railway build + deploy config (one-shot, never restart) |
 | `.github/workflows/provision-databases.yml` | CI workflow that runs the CI image                      |
 
 ## Setup
