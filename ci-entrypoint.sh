@@ -9,8 +9,18 @@ set -e
 #    those variables and creates the actual databases/users.
 #
 # Required env: RAILWAY_TOKEN, RAILWAY_SERVICE_NAME
-# Optional env: SERVICES_FILE (default: services.txt)
+# Optional env:
+#   REPO_DIR      — path to the cloned repo (default: current directory).
+#                   Set this when the CI provider mounts the repo somewhere
+#                   other than the image's WORKDIR (e.g. GitLab: $CI_PROJECT_DIR).
+#   SERVICES_FILE — path to the services file (default: services.txt, relative
+#                   to REPO_DIR if set).
 
+# cd to the repo directory so ci-setup and railway up find the right files.
+REPO_DIR="${REPO_DIR:-.}"
+cd "$REPO_DIR"
+
+echo "=== Working directory: $(pwd) ==="
 echo "=== Ensuring database variables ==="
 ci-setup
 

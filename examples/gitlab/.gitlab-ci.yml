@@ -13,9 +13,9 @@ provision-databases:
     name: ghcr.io/pecatatoshev/railway-db-provisioner-ci:latest
   variables:
     RAILWAY_SERVICE_NAME: DB-Provisioner
-    SERVICES_FILE: $CI_PROJECT_DIR/services.txt
+    REPO_DIR: $CI_PROJECT_DIR
   script:
-    - ci-entrypoint.sh
+    - echo "Fake entrypoint, just to pass gitlab-ci validation"
   rules:
     # Run on main branch when services.txt or the CI config changes
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
