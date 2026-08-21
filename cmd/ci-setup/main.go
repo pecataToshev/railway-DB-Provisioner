@@ -14,13 +14,17 @@
 //	RAILWAY_TOKEN        - Railway API token (required)
 //	RAILWAY_SERVICE_NAME - name of the db-provisioner Railway service (required)
 //	SERVICES_FILE        - path to services.txt (default: services.txt)
+//
+// The following variables are read from the Railway service (not the CI env):
+//
+//	POSTGRES_SERVICE_NAME - name of the Postgres plugin/service in Railway,
+//	                       used to build Railway variable references for host:port
 package main
 
 import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"strings"
 
@@ -84,20 +88,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Derive host:port from the db-provisioner's own POSTGRES_URL.
-	postgresURL, ok := existing["POSTGRES_URL"]
-	if !ok || postgresURL == "" {
-		slog.Error("POSTGRES_URL not found in service variables", "service", serviceName)
+	// Read the Postgres service name from the Railway service variables.
+	// It's used to build Railway variable references for host:port, e.g.
+	//   ${{Postgres-18.PGHOST}}  ${{Postgres-18.PGPORT}}
+	// Using references means the host is always current — Railway resolves
+	// them at runtime, and references follow service renames automatically.
+	postgresServiceName, ok := existing["POSTGRES_SERVICE_NAME"]
+	if !ok || postgresServiceName == "" {
+		slog.Error("POSTGRES_SERVICE_NAME not found in service variables", "service", serviceName)
 		os.Exit(1)
 	}
 
-	host, err := extractHost(postgresURL)
-	if err != nil {
-		slog.Error("failed to extract host from POSTGRES_URL", "error", err)
-		os.Exit(1)
-	}
-
-	slog.Info("derived database host", "host", host)
+	hostRef := fmt.Sprintf("${{%s.PGHOST}}", postgresServiceName)
+	portRef := fmt.Sprintf("${{%s.PGPORT}}", postgresServiceName)
 
 	set := 0
 	skipped := 0
@@ -121,7 +124,8 @@ func main() {
 				os.Exit(1)
 			}
 
-			connURL := fmt.Sprintf("postgresql://%s:%s@%s/%s", dbUser, dbPass, host, dbName)
+			connURL := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s",
+				dbUser, dbPass, hostRef, portRef, dbName)
 
 			slog.Info("setting variable", "var", urlVar, "value", "<redacted>")
 			if err := client.SetVariable(serviceName, urlVar, connURL); err != nil {
@@ -133,18 +137,6 @@ func main() {
 	}
 
 	slog.Info("ci-setup complete", "set", set, "skipped", skipped)
-}
-
-// extractHost parses a postgresql connection URL and returns "host:port".
-func extractHost(rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse URL: %w", err)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("URL has no host")
-	}
-	return u.Host, nil
 }
 
 // generatePassword returns a cryptographically secure alphanumeric string.
