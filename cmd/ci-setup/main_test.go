@@ -5,6 +5,34 @@ import (
 	"testing"
 )
 
+// TestExtractHostPort verifies host:port extraction from postgresql URLs.
+func TestExtractHostPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		want    string
+		wantErr bool
+	}{
+		{"standard", "postgresql://user:pass@postgres.railway.internal:5432/db", "postgres.railway.internal:5432", false},
+		{"no port", "postgresql://user:pass@host.example.com/db", "host.example.com", false},
+		{"localhost", "postgresql://user:pass@localhost:5432/db", "localhost:5432", false},
+		{"missing host", "postgresql://user:pass@/db", "", true},
+		{"invalid url", "://not-a-url", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractHostPort(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("extractHostPort(%q): err = %v, wantErr = %v", tt.url, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("extractHostPort(%q): got %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGeneratePasswordLength verifies the password has the requested length.
 func TestGeneratePasswordLength(t *testing.T) {
 	for _, length := range []int{1, 16, 32, 64, 128} {

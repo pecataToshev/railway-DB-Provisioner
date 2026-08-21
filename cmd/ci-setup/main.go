@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 
@@ -102,17 +103,43 @@ func main() {
 	hostRef := fmt.Sprintf("${{%s.PGHOST}}", postgresServiceName)
 	portRef := fmt.Sprintf("${{%s.PGPORT}}", postgresServiceName)
 
+	// Fetch the current Postgres host:port from the Postgres service itself.
+	// Railway resolves references when returning variables, so we compare
+	// the resolved host:port in existing *_POSTGRES_URL against the current
+	// values to detect stale hardcoded hosts (e.g. from v1.3).
+	pgVars, err := client.GetVariables(postgresServiceName)
+	if err != nil {
+		slog.Error("failed to fetch Postgres service variables", "service", postgresServiceName, "error", err)
+		os.Exit(1)
+	}
+	pgHost := pgVars["PGHOST"]
+	pgPort := pgVars["PGPORT"]
+	if pgHost == "" || pgPort == "" {
+		slog.Error("PGHOST or PGPORT not found in Postgres service variables", "service", postgresServiceName)
+		os.Exit(1)
+	}
+	expectedHostPort := pgHost + ":" + pgPort
+	slog.Info("resolved Postgres host:port", "host_port", expectedHostPort)
+
 	set := 0
 	skipped := 0
+	updated := 0
 
 	for dbType, entries := range groups {
 		for _, entry := range entries {
 			urlVar := config.BuildEnvVarName(entry.Prefix, dbType, "URL")
 
-			if v, ok := existing[urlVar]; ok && v != "" {
-				slog.Info("variable already set, skipping", "var", urlVar)
-				skipped++
-				continue
+			if existingVal, ok := existing[urlVar]; ok && existingVal != "" {
+				currentHostPort, err := extractHostPort(existingVal)
+				if err != nil {
+					slog.Warn("existing variable has unparseable URL, regenerating", "var", urlVar, "error", err)
+				} else if currentHostPort == expectedHostPort {
+					slog.Info("variable already set, host:port current, skipping", "var", urlVar)
+					skipped++
+					continue
+				} else {
+					slog.Info("variable has stale host:port, updating", "var", urlVar, "current", currentHostPort, "expected", expectedHostPort)
+				}
 			}
 
 			prefixLower := strings.ToLower(entry.Prefix)
@@ -132,11 +159,27 @@ func main() {
 				slog.Error("failed to set variable", "var", urlVar, "error", err)
 				os.Exit(1)
 			}
-			set++
+			if _, ok := existing[urlVar]; ok {
+				updated++
+			} else {
+				set++
+			}
 		}
 	}
 
-	slog.Info("ci-setup complete", "set", set, "skipped", skipped)
+	slog.Info("ci-setup complete", "set", set, "updated", updated, "skipped", skipped)
+}
+
+// extractHostPort parses a postgresql connection URL and returns "host:port".
+func extractHostPort(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse URL: %w", err)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("URL has no host")
+	}
+	return u.Host, nil
 }
 
 // generatePassword returns a cryptographically secure alphanumeric string.
