@@ -25,7 +25,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"strings"
 
@@ -100,27 +99,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	hostRef := fmt.Sprintf("${{%s.PGHOST}}", postgresServiceName)
-	portRef := fmt.Sprintf("${{%s.PGPORT}}", postgresServiceName)
-
-	// Fetch the current Postgres host:port from the Postgres service itself.
-	// Railway resolves references when returning variables, so we compare
-	// the resolved host:port in existing *_POSTGRES_URL against the current
-	// values to detect stale hardcoded hosts (e.g. from v1.3).
-	pgVars, err := client.GetVariables(postgresServiceName)
-	if err != nil {
-		slog.Error("failed to fetch Postgres service variables", "service", postgresServiceName, "error", err)
-		os.Exit(1)
-	}
-	pgHost := pgVars["PGHOST"]
-	pgPort := pgVars["PGPORT"]
-	if pgHost == "" || pgPort == "" {
-		slog.Error("PGHOST or PGPORT not found in Postgres service variables", "service", postgresServiceName)
-		os.Exit(1)
-	}
-	expectedHostPort := pgHost + ":" + pgPort
-	slog.Info("resolved Postgres host:port", "host_port", expectedHostPort)
-
 	set := 0
 	skipped := 0
 	updated := 0
@@ -130,16 +108,12 @@ func main() {
 			urlVar := config.BuildEnvVarName(entry.Prefix, dbType, "URL")
 
 			if existingVal, ok := existing[urlVar]; ok && existingVal != "" {
-				currentHostPort, err := extractHostPort(existingVal)
-				if err != nil {
-					slog.Warn("existing variable has unparseable URL, regenerating", "var", urlVar, "error", err)
-				} else if currentHostPort == expectedHostPort {
-					slog.Info("variable already set, host:port current, skipping", "var", urlVar)
+				if hasCurrentHostRef(existingVal, postgresServiceName) {
+					slog.Info("variable already uses current Railway references, skipping", "var", urlVar)
 					skipped++
 					continue
-				} else {
-					slog.Info("variable has stale host:port, updating", "var", urlVar, "current", currentHostPort, "expected", expectedHostPort)
 				}
+				slog.Info("variable needs update, regenerating with Railway references", "var", urlVar)
 			}
 
 			prefixLower := strings.ToLower(entry.Prefix)
@@ -151,8 +125,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			connURL := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s",
-				dbUser, dbPass, hostRef, portRef, dbName)
+			connURL := buildConnURL(dbUser, dbPass, dbName, postgresServiceName)
 
 			slog.Info("setting variable", "var", urlVar, "value", "<redacted>")
 			if err := client.SetVariable(serviceName, urlVar, connURL); err != nil {
@@ -170,16 +143,23 @@ func main() {
 	slog.Info("ci-setup complete", "set", set, "updated", updated, "skipped", skipped)
 }
 
-// extractHostPort parses a postgresql connection URL and returns "host:port".
-func extractHostPort(rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse URL: %w", err)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("URL has no host")
-	}
-	return u.Host, nil
+// hasCurrentHostRef checks whether a connection URL already contains the
+// expected Railway host:port reference for the given Postgres service name,
+// e.g. "@${{Postgres-18.PGHOST}}:${{Postgres-18.PGPORT}}". This ensures we
+// skip only variables that are both reference-based AND use the current
+// service name for both host and port. Hardcoded hosts (from v1.3), stale
+// service names, or partial references won't match and will be regenerated.
+func hasCurrentHostRef(connURL, postgresServiceName string) bool {
+	expected := fmt.Sprintf("@${{%s.PGHOST}}:${{%s.PGPORT}}", postgresServiceName, postgresServiceName)
+	return strings.Contains(connURL, expected)
+}
+
+// buildConnURL builds a PostgreSQL connection URL using Railway variable
+// references for host and port, so the host is always resolved at runtime.
+func buildConnURL(user, pass, dbName, postgresServiceName string) string {
+	hostRef := fmt.Sprintf("${{%s.PGHOST}}", postgresServiceName)
+	portRef := fmt.Sprintf("${{%s.PGPORT}}", postgresServiceName)
+	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s", user, pass, hostRef, portRef, dbName)
 }
 
 // generatePassword returns a cryptographically secure alphanumeric string.

@@ -5,31 +5,140 @@ import (
 	"testing"
 )
 
-// TestExtractHostPort verifies host:port extraction from postgresql URLs.
-func TestExtractHostPort(t *testing.T) {
+// TestHasCurrentHostRef verifies that the reference check correctly
+// identifies URLs that use the current Postgres service name for both
+// host and port.
+func TestHasCurrentHostRef(t *testing.T) {
 	tests := []struct {
-		name    string
-		url     string
-		want    string
-		wantErr bool
+		name        string
+		connURL     string
+		pgService   string
+		wantCurrent bool
 	}{
-		{"standard", "postgresql://user:pass@postgres.railway.internal:5432/db", "postgres.railway.internal:5432", false},
-		{"no port", "postgresql://user:pass@host.example.com/db", "host.example.com", false},
-		{"localhost", "postgresql://user:pass@localhost:5432/db", "localhost:5432", false},
-		{"missing host", "postgresql://user:pass@/db", "", true},
-		{"invalid url", "://not-a-url", "", true},
+		{
+			name:        "references with matching service name",
+			connURL:     "postgresql://user:pass@${{Postgres-18.PGHOST}}:${{Postgres-18.PGPORT}}/db",
+			pgService:   "Postgres-18",
+			wantCurrent: true,
+		},
+		{
+			name:        "references with different service name",
+			connURL:     "postgresql://user:pass@${{Postgres-18.PGHOST}}:${{Postgres-18.PGPORT}}/db",
+			pgService:   "Postgres-19",
+			wantCurrent: false,
+		},
+		{
+			name:        "hardcoded host from v1.3",
+			connURL:     "postgresql://user:pass@postgres.railway.internal:5432/db",
+			pgService:   "Postgres-18",
+			wantCurrent: false,
+		},
+		{
+			name:        "host reference correct, port reference wrong service",
+			connURL:     "postgresql://user:pass@${{Postgres-18.PGHOST}}:${{Postgres-19.PGPORT}}/db",
+			pgService:   "Postgres-18",
+			wantCurrent: false,
+		},
+		{
+			name:        "host reference correct, port hardcoded",
+			connURL:     "postgresql://user:pass@${{Postgres-18.PGHOST}}:5432/db",
+			pgService:   "Postgres-18",
+			wantCurrent: false,
+		},
+		{
+			name:        "reference without @ prefix",
+			connURL:     "postgresql://user:pass${{Postgres-18.PGHOST}}:${{Postgres-18.PGPORT}}/db",
+			pgService:   "Postgres-18",
+			wantCurrent: false,
+		},
+		{
+			name:        "empty URL",
+			connURL:     "",
+			pgService:   "Postgres-18",
+			wantCurrent: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractHostPort(tt.url)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("extractHostPort(%q): err = %v, wantErr = %v", tt.url, err, tt.wantErr)
-			}
-			if got != tt.want {
-				t.Errorf("extractHostPort(%q): got %q, want %q", tt.url, got, tt.want)
+			got := hasCurrentHostRef(tt.connURL, tt.pgService)
+			if got != tt.wantCurrent {
+				t.Errorf("hasCurrentHostRef(%q, %q) = %v, want %v",
+					tt.connURL, tt.pgService, got, tt.wantCurrent)
 			}
 		})
+	}
+}
+
+// TestBuildConnURL verifies that generated URLs use Railway references.
+func TestBuildConnURL(t *testing.T) {
+	got := buildConnURL("myuser", "mypass", "mydb", "Postgres-18")
+	want := "postgresql://myuser:mypass@${{Postgres-18.PGHOST}}:${{Postgres-18.PGPORT}}/mydb"
+	if got != want {
+		t.Errorf("buildConnURL() = %q, want %q", got, want)
+	}
+
+	// Verify the built URL passes the reference check.
+	if !hasCurrentHostRef(got, "Postgres-18") {
+		t.Error("buildConnURL output failed hasCurrentHostRef check")
+	}
+}
+
+// TestBuildConnURLPositions verifies that PGHOST and PGPORT references are
+// in the correct positions within the URL: host after @, port after host:,
+// and the database name after the port.
+func TestBuildConnURLPositions(t *testing.T) {
+	const pgService = "Postgres-18"
+	url := buildConnURL("user", "pass", "test_db", pgService)
+
+	hostRef := "${{" + pgService + ".PGHOST}}"
+	portRef := "${{" + pgService + ".PGPORT}}"
+
+	atIdx := strings.Index(url, "@")
+	hostIdx := strings.Index(url, hostRef)
+	colonAfterHost := strings.Index(url[hostIdx:], ":") + hostIdx
+	portIdx := strings.Index(url, portRef)
+	slashAfterPort := strings.Index(url[portIdx:], "/") + portIdx
+
+	if atIdx < 0 {
+		t.Fatal("URL missing @ separator")
+	}
+	if hostIdx < 0 {
+		t.Fatal("URL missing PGHOST reference")
+	}
+	if portIdx < 0 {
+		t.Fatal("URL missing PGPORT reference")
+	}
+
+	// @ must come before PGHOST
+	if hostIdx < atIdx {
+		t.Errorf("PGHOST ref at %d before @ at %d", hostIdx, atIdx)
+	}
+	// PGHOST must come before the colon that separates host:port
+	if colonAfterHost < hostIdx {
+		t.Errorf("host:port colon at %d before PGHOST at %d", colonAfterHost, hostIdx)
+	}
+	// PGPORT must come after the host:port colon
+	if portIdx < colonAfterHost {
+		t.Errorf("PGPORT ref at %d before host:port colon at %d", portIdx, colonAfterHost)
+	}
+	// / must come after PGPORT
+	if slashAfterPort < portIdx {
+		t.Errorf("database slash at %d before PGPORT at %d", slashAfterPort, portIdx)
+	}
+
+	// PGPORT must not appear before PGHOST (no swap)
+	if portIdx < hostIdx {
+		t.Errorf("PGPORT at %d appears before PGHOST at %d (swapped)", portIdx, hostIdx)
+	}
+}
+
+// TestHasCurrentHostRefSwappedRefs verifies that swapped PGHOST/PGPORT
+// references are detected as needing update.
+func TestHasCurrentHostRefSwappedRefs(t *testing.T) {
+	swapped := "postgresql://user:pass@${{Postgres-18.PGPORT}}:${{Postgres-18.PGHOST}}/db"
+	if hasCurrentHostRef(swapped, "Postgres-18") {
+		t.Error("hasCurrentHostRef returned true for swapped PGHOST/PGPORT")
 	}
 }
 
