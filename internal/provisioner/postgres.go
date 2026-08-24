@@ -96,19 +96,33 @@ func (p *postgresProvisioner) Provision(cfg config.ServiceConfig) error {
 	}
 
 	if !dbExists {
+		// Create with the superuser (provisioner connection) as owner.
+		// The app user gets privileges (CONNECT, CREATE, TEMPORARY) but
+		// cannot DROP or ALTER the database itself.
 		if _, err := p.db.Exec(fmt.Sprintf(
-			`CREATE DATABASE %s OWNER %s`,
-			quoteIdentifier(cfg.DBName), quoteIdentifier(cfg.User),
+			`CREATE DATABASE %s`,
+			quoteIdentifier(cfg.DBName),
 		)); err != nil {
 			return fmt.Errorf("create database: %w", err)
 		}
 		log.Info(prefix+" created database", "database", cfg.DBName)
 	} else {
-		log.Info(prefix+" database exists", "database", cfg.DBName)
+		// Ensure the superuser retains ownership — fixes databases that
+		// were created with a different owner (e.g. v1.3 set the app user
+		// as owner, or the database was created manually).
+		if _, err := p.db.Exec(fmt.Sprintf(
+			`ALTER DATABASE %s OWNER TO CURRENT_USER`,
+			quoteIdentifier(cfg.DBName),
+		)); err != nil {
+			return fmt.Errorf("alter database owner: %w", err)
+		}
+		log.Info(prefix+" database exists, ownership verified", "database", cfg.DBName)
 	}
 
+	// Grant CONNECT, CREATE, TEMPORARY — enough for normal app use and
+	// creating additional schemas, but NOT DROP DATABASE or ALTER DATABASE.
 	if _, err := p.db.Exec(fmt.Sprintf(
-		`GRANT ALL PRIVILEGES ON DATABASE %s TO %s`,
+		`GRANT CONNECT, CREATE, TEMPORARY ON DATABASE %s TO %s`,
 		quoteIdentifier(cfg.DBName), quoteIdentifier(cfg.User),
 	)); err != nil {
 		return fmt.Errorf("grant database privileges: %w", err)
