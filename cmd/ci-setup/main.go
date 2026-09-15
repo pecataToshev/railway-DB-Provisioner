@@ -95,12 +95,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fetch rendered variables to get the resolved POSTGRES_SERVICE_NAME.
+	// POSTGRES_SERVICE_NAME may itself be a Railway reference (e.g.
+	// ${{Postgres-18.RAILWAY_SERVICE_NAME}}), so we need the resolved value
+	// to build correct references like ${{Postgres-18.PGHOST}}.
+	rendered, err := client.GetVariablesRendered(serviceName)
+	if err != nil {
+		slog.Error("failed to fetch rendered variables", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+
 	// Read the Postgres service name from the Railway service variables.
 	// It's used to build Railway variable references for host:port, e.g.
 	//   ${{Postgres-18.PGHOST}}  ${{Postgres-18.PGPORT}}
 	// Using references means the host is always current — Railway resolves
 	// them at runtime, and references follow service renames automatically.
-	postgresServiceName, ok := existing["POSTGRES_SERVICE_NAME"]
+	postgresServiceName, ok := rendered["POSTGRES_SERVICE_NAME"]
 	if !ok || postgresServiceName == "" {
 		slog.Error("POSTGRES_SERVICE_NAME not found in service variables", "service", serviceName)
 		os.Exit(1)
@@ -109,6 +119,7 @@ func main() {
 	set := 0
 	skipped := 0
 	updated := 0
+	pending := make(map[string]string)
 
 	for dbType, entries := range groups {
 		for _, entry := range entries {
@@ -133,17 +144,25 @@ func main() {
 			}
 
 			connURL := buildConnURL(dbUser, dbPass, dbName, postgresServiceName)
+			pending[urlVar] = connURL
 
-			slog.Info("setting variable", "var", urlVar, "value", "<redacted>")
-			if err := client.SetVariable(serviceName, urlVar, connURL); err != nil {
-				slog.Error("failed to set variable", "var", urlVar, "error", err)
-				os.Exit(1)
-			}
 			if _, ok := existing[urlVar]; ok {
 				updated++
 			} else {
 				set++
 			}
+		}
+	}
+
+	// Set all new/updated variables in one atomic mutation so the deploy
+	// sees them all at once — no race condition with partial propagation.
+	if len(pending) > 0 {
+		for urlVar := range pending {
+			slog.Info("setting variable", "var", urlVar, "value", "<redacted>")
+		}
+		if err := client.SetVariables(serviceName, pending); err != nil {
+			slog.Error("failed to set variables", "error", err)
+			os.Exit(1)
 		}
 	}
 
