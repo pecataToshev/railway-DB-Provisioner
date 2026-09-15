@@ -124,6 +124,8 @@ The provisioner uses `RAILWAY_SERVICE_NAME` to generate Railway variable referen
 
 In **your** consuming repo, add a CI workflow that runs the CI Docker image against your `services.txt`. See [`env.ci.example`](https://github.com/pecataToshev/railway-DB-Provisioner/blob/main/env.ci.example) for the required environment variables.
 
+By default, `ci-setup` triggers a deploy and **waits for it to complete**, streaming status changes and runtime logs to the CI output. If the deploy fails, the CI step fails. Set `DEPLOY_WAIT=false` to trigger the deploy and exit immediately (fire-and-forget) instead.
+
 Example consumer repos are provided in the [`examples/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples) directory — each contains a complete setup with `services.txt`, `Dockerfile`, CI config, and a README:
 
 - **GitHub Actions**: [`examples/github/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples/github) → copy into your GitHub repo

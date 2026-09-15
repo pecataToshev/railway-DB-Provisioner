@@ -150,12 +150,24 @@ func main() {
 	slog.Info("ci-setup complete", "set", set, "updated", updated, "skipped", skipped)
 
 	// Deploy the provisioner service so it picks up any new/updated variables.
-	slog.Info("deploying provisioner service", "service", serviceName)
-	if err := client.Deploy(serviceName); err != nil {
-		slog.Error("failed to deploy service", "service", serviceName, "error", err)
-		os.Exit(1)
+	// DEPLOY_WAIT controls whether to block until the deploy finishes (default)
+	// or trigger and exit immediately.
+	deployWait := os.Getenv("DEPLOY_WAIT")
+	if deployWait == "" || strings.EqualFold(deployWait, "true") || deployWait == "1" {
+		slog.Info("deploying provisioner service (waiting for completion)", "service", serviceName)
+		if err := client.Deploy(serviceName); err != nil {
+			slog.Error("deploy failed", "service", serviceName, "error", err)
+			os.Exit(1)
+		}
+		slog.Info("deploy completed successfully")
+	} else {
+		slog.Info("triggering deploy (detached)", "service", serviceName)
+		if err := client.DeployDetached(serviceName); err != nil {
+			slog.Error("failed to trigger deploy", "service", serviceName, "error", err)
+			os.Exit(1)
+		}
+		slog.Info("deploy triggered")
 	}
-	slog.Info("deploy triggered")
 }
 
 // hasCurrentHostRef checks whether a connection URL already contains the

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const graphqlEndpoint = "https://backboard.railway.com/graphql/v2"
@@ -231,14 +232,31 @@ func (c *Client) SetVariable(serviceName, key, value string) error {
 	return nil
 }
 
-// Deploy triggers a deployment for the service.
+// Deploy triggers a deployment for the service, waits for it to complete,
+// and streams the runtime logs. Returns an error if the deploy fails.
 func (c *Client) Deploy(serviceName string) error {
-	serviceID, err := c.resolveServiceID(serviceName)
+	deploymentID, err := c.triggerDeploy(serviceName)
 	if err != nil {
 		return err
 	}
+	return c.waitForDeployment(deploymentID)
+}
 
-	_, err = c.graphqlRequest(
+// DeployDetached triggers a deployment and returns immediately without
+// waiting for it to complete.
+func (c *Client) DeployDetached(serviceName string) error {
+	_, err := c.triggerDeploy(serviceName)
+	return err
+}
+
+// triggerDeploy triggers a deployment and returns the deployment ID.
+func (c *Client) triggerDeploy(serviceName string) (string, error) {
+	serviceID, err := c.resolveServiceID(serviceName)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := c.graphqlRequest(
 		`mutation serviceInstanceDeploy($serviceId: String!, $environmentId: String!) {
 			serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
 		}`,
@@ -248,7 +266,129 @@ func (c *Client) Deploy(serviceName string) error {
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("deploy service %s: %w", serviceName, err)
+		return "", fmt.Errorf("deploy service %s: %w", serviceName, err)
 	}
-	return nil
+
+	deploymentID, ok := data["serviceInstanceDeploy"].(string)
+	if !ok || deploymentID == "" {
+		return "", fmt.Errorf("deploy service %s: no deployment ID returned", serviceName)
+	}
+	return deploymentID, nil
+}
+
+// waitForDeployment polls the deployment status until it reaches a terminal
+// state (SUCCESS, FAILED, CRASHED, SKIPPED, REMOVED). It streams runtime
+// logs as they become available. Returns an error if the deploy fails.
+func (c *Client) waitForDeployment(deploymentID string) error {
+	const pollInterval = 5 * time.Second
+
+	// Terminal statuses — once reached, stop polling.
+	terminal := map[string]bool{
+		"SUCCESS": true,
+		"FAILED":  true,
+		"CRASHED": true,
+		"SKIPPED": true,
+		"REMOVED": true,
+	}
+
+	var lastStatus string
+	logsFetched := 0
+
+	for {
+		data, err := c.graphqlRequest(
+			`query deployment($id: String!) {
+				deployment(id: $id) {
+					id
+					status
+				}
+			}`,
+			map[string]any{"id": deploymentID},
+		)
+		if err != nil {
+			return fmt.Errorf("fetch deployment status: %w", err)
+		}
+
+		deployment, ok := data["deployment"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("deployment not found in response")
+		}
+
+		status, _ := deployment["status"].(string)
+		if status != lastStatus {
+			fmt.Printf("=== Deployment status: %s ===\n", status)
+			lastStatus = status
+		}
+
+		// Fetch and print any new runtime logs once the deployment is running.
+		if status == "DEPLOYING" || status == "SUCCESS" || status == "FAILED" || status == "CRASHED" {
+			logs, err := c.getDeploymentLogs(deploymentID, logsFetched)
+			if err == nil && len(logs) > logsFetched {
+				for _, l := range logs[logsFetched:] {
+					fmt.Printf("[%s] %s\n", l.severity, l.message)
+				}
+				logsFetched = len(logs)
+			}
+		}
+
+		if terminal[status] {
+			if status != "SUCCESS" {
+				// Fetch any remaining logs on failure.
+				logs, err := c.getDeploymentLogs(deploymentID, logsFetched)
+				if err == nil && len(logs) > logsFetched {
+					for _, l := range logs[logsFetched:] {
+						fmt.Printf("[%s] %s\n", l.severity, l.message)
+					}
+				}
+				return fmt.Errorf("deployment %s ended with status %s", deploymentID, status)
+			}
+			return nil
+		}
+
+		time.Sleep(pollInterval)
+	}
+}
+
+type deploymentLog struct {
+	timestamp string
+	message   string
+	severity  string
+}
+
+// getDeploymentLogs fetches runtime logs for a deployment.
+func (c *Client) getDeploymentLogs(deploymentID string, limit int) ([]deploymentLog, error) {
+	data, err := c.graphqlRequest(
+		`query deploymentLogs($deploymentId: String!, $limit: Int) {
+			deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
+				timestamp
+				message
+				severity
+			}
+		}`,
+		map[string]any{
+			"deploymentId": deploymentID,
+			"limit":        500,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	logsRaw, ok := data["deploymentLogs"].([]any)
+	if !ok {
+		return nil, nil
+	}
+
+	logs := make([]deploymentLog, 0, len(logsRaw))
+	for _, l := range logsRaw {
+		m, ok := l.(map[string]any)
+		if !ok {
+			continue
+		}
+		logs = append(logs, deploymentLog{
+			timestamp: m["timestamp"].(string),
+			message:   m["message"].(string),
+			severity:  m["severity"].(string),
+		})
+	}
+	return logs, nil
 }
