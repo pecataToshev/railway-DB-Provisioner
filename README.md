@@ -32,15 +32,15 @@ CI pipeline                                Railway project
 │    ensure *_URL vars    │               │   env: QUIZZER_POSTGRES_URL      │
 │    (generate passwords) │               │   env: AUTH_POSTGRES_URL         │
 │                         │──(2) deploy──▶│   ...                            │
-│  railway up:            │               │                                  │
+│  deploy:                │               │                                  │
 │    deploy provisioner   │               │ provisioner binary runs:         │
 │                         │               │   → create role + database       │
 │                         │               │   → print reference URLs         │
 └─────────────────────────┘               └──────────────────────────────────┘
 ```
 
-1. **`ci-setup`** fetches the provisioner service's existing variables via Railway CLI, finds `POSTGRES_URL` to derive the host:port, and for each service in `services.txt` ensures `<PREFIX>_POSTGRES_URL` exists (generating a password and building the connection string if missing).
-2. **`railway up`** deploys the provisioner service. The `provisioner` binary reads all `*_POSTGRES_URL` variables, connects to Postgres via `POSTGRES_URL` (superuser), and creates the corresponding roles + databases.
+1. **`ci-setup`** resolves the project and environment IDs from the Railway token, fetches the provisioner service's existing variables (unrendered — references like `${{...}}` are returned as-is), reads `POSTGRES_SERVICE_NAME` to build Railway variable references for host:port, and for each service in `services.txt` ensures `<PREFIX>_POSTGRES_URL` exists with the correct references (generating a password and building the connection string if missing or stale).
+2. **Deploy** triggers a deployment of the provisioner service via the Railway GraphQL API. The `provisioner` binary reads all `*_POSTGRES_URL` variables, connects to Postgres via `POSTGRES_URL` (superuser), and creates the corresponding roles + databases.
 
 ## How it works
 
@@ -167,7 +167,7 @@ The CI image bundles:
 
 - `ci-setup` Go binary (var provisioning logic)
 - Railway CLI (API calls)
-- `ci-entrypoint.sh` (orchestrates: ci-setup → railway up)
+- `ci-entrypoint.sh` (orchestrates: ci-setup → deploy)
 
 ---
 
@@ -208,7 +208,7 @@ railway-DB-Provisioner/
 ├── services.example.txt         # Example service declarations (copy to services.txt)
 ├── env.provisioner.example      # Env vars for the provisioner service (Railway)
 ├── env.ci.example               # Env vars for the CI pipeline (GitHub Actions / GitLab CI)
-├── ci-entrypoint.sh             # CI entrypoint (ci-setup + railway up)
+├── ci-entrypoint.sh             # CI entrypoint (ci-setup + deploy)
 ├── .dockerignore
 ├── .gitignore
 ├── CONTRIBUTING.md

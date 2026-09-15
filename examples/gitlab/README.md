@@ -34,6 +34,6 @@ This is a complete example of a consuming repository that uses
 
 1. `ci-setup` reads `services.txt`, fetches existing variables from the Railway
    service, and generates `*_POSTGRES_URL` for any missing services.
-2. `railway up` deploys the provisioner, which creates the PostgreSQL roles +
+2. `ci-setup` deploys the provisioner, which creates the PostgreSQL roles +
    databases.
 3. Existing variables are left untouched (idempotent).

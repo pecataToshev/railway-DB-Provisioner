@@ -70,6 +70,15 @@ func TestHasCurrentHostRef(t *testing.T) {
 	}
 }
 
+// TestHasCurrentHostRefSwappedRefs verifies that swapped PGHOST/PGPORT
+// references are detected as needing update.
+func TestHasCurrentHostRefSwappedRefs(t *testing.T) {
+	swapped := "postgresql://user:pass@${{Postgres-18.PGPORT}}:${{Postgres-18.PGHOST}}/db"
+	if hasCurrentHostRef(swapped, "Postgres-18") {
+		t.Error("hasCurrentHostRef returned true for swapped PGHOST/PGPORT")
+	}
+}
+
 // TestBuildConnURL verifies that generated URLs use Railway references.
 func TestBuildConnURL(t *testing.T) {
 	got := buildConnURL("myuser", "mypass", "mydb", "Postgres-18")
@@ -130,15 +139,6 @@ func TestBuildConnURLPositions(t *testing.T) {
 	// PGPORT must not appear before PGHOST (no swap)
 	if portIdx < hostIdx {
 		t.Errorf("PGPORT at %d appears before PGHOST at %d (swapped)", portIdx, hostIdx)
-	}
-}
-
-// TestHasCurrentHostRefSwappedRefs verifies that swapped PGHOST/PGPORT
-// references are detected as needing update.
-func TestHasCurrentHostRefSwappedRefs(t *testing.T) {
-	swapped := "postgresql://user:pass@${{Postgres-18.PGPORT}}:${{Postgres-18.PGHOST}}/db"
-	if hasCurrentHostRef(swapped, "Postgres-18") {
-		t.Error("hasCurrentHostRef returned true for swapped PGHOST/PGPORT")
 	}
 }
 

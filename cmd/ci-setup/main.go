@@ -81,7 +81,14 @@ func main() {
 
 	client := railway.NewClient(token)
 
-	// Fetch existing variables so we only set what's missing.
+	// Resolve project and environment IDs from the token.
+	if err := client.ResolveIDs(); err != nil {
+		slog.Error("failed to resolve Railway token", "error", err)
+		os.Exit(1)
+	}
+
+	// Fetch existing variables (unrendered — references like ${{...}} are
+	// returned as-is, not resolved). This lets us detect stale references.
 	existing, err := client.GetVariables(serviceName)
 	if err != nil {
 		slog.Error("failed to fetch existing variables", "service", serviceName, "error", err)
@@ -141,6 +148,14 @@ func main() {
 	}
 
 	slog.Info("ci-setup complete", "set", set, "updated", updated, "skipped", skipped)
+
+	// Deploy the provisioner service so it picks up any new/updated variables.
+	slog.Info("deploying provisioner service", "service", serviceName)
+	if err := client.Deploy(serviceName); err != nil {
+		slog.Error("failed to deploy service", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("deploy triggered")
 }
 
 // hasCurrentHostRef checks whether a connection URL already contains the
