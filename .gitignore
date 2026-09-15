@@ -8,3 +8,7 @@
 
 # OS
 .DS_Store
+
+# Debug
+.env.debug
+services.txt
