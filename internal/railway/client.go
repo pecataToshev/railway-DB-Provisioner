@@ -160,6 +160,16 @@ func (c *Client) resolveServiceID(serviceName string) (string, error) {
 // GetVariables fetches all environment variables for a service as a map.
 // References like ${{Service.VAR}} are returned as-is (unrendered).
 func (c *Client) GetVariables(serviceName string) (map[string]string, error) {
+	return c.getVariables(serviceName, true)
+}
+
+// GetVariablesRendered fetches all environment variables with references
+// resolved to their actual values.
+func (c *Client) GetVariablesRendered(serviceName string) (map[string]string, error) {
+	return c.getVariables(serviceName, false)
+}
+
+func (c *Client) getVariables(serviceName string, unrendered bool) (map[string]string, error) {
 	serviceID, err := c.resolveServiceID(serviceName)
 	if err != nil {
 		return nil, err
@@ -178,7 +188,7 @@ func (c *Client) GetVariables(serviceName string) (map[string]string, error) {
 			"projectId":     c.projectID,
 			"environmentId": c.environmentID,
 			"serviceId":     serviceID,
-			"unrendered":    true,
+			"unrendered":    unrendered,
 		},
 	)
 	if err != nil {
@@ -206,28 +216,34 @@ func (c *Client) GetVariables(serviceName string) (map[string]string, error) {
 // SetVariable sets a single environment variable on a service.
 // Uses skipDeploys=true so changes don't trigger a redeploy per variable.
 func (c *Client) SetVariable(serviceName, key, value string) error {
+	return c.SetVariables(serviceName, map[string]string{key: value})
+}
+
+// SetVariables sets multiple environment variables on a service in one
+// atomic mutation. Uses skipDeploys=true — deploy is triggered separately
+// by the caller after all variables are set.
+func (c *Client) SetVariables(serviceName string, vars map[string]string) error {
 	serviceID, err := c.resolveServiceID(serviceName)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.graphqlRequest(
-		`mutation variableUpsert($input: VariableUpsertInput!) {
-			variableUpsert(input: $input)
+		`mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) {
+			variableCollectionUpsert(input: $input)
 		}`,
 		map[string]any{
 			"input": map[string]any{
 				"projectId":     c.projectID,
 				"environmentId": c.environmentID,
 				"serviceId":     serviceID,
-				"name":          key,
-				"value":         value,
+				"variables":     vars,
 				"skipDeploys":   true,
 			},
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("set variable %s: %w", key, err)
+		return fmt.Errorf("set variables: %w", err)
 	}
 	return nil
 }
@@ -239,7 +255,7 @@ func (c *Client) Deploy(serviceName string) error {
 	if err != nil {
 		return err
 	}
-	return c.waitForDeployment(deploymentID)
+	return c.waitForDeployment(serviceName, deploymentID)
 }
 
 // DeployDetached triggers a deployment and returns immediately without
@@ -257,8 +273,8 @@ func (c *Client) triggerDeploy(serviceName string) (string, error) {
 	}
 
 	data, err := c.graphqlRequest(
-		`mutation serviceInstanceDeploy($serviceId: String!, $environmentId: String!) {
-			serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
+		`mutation serviceInstanceDeployV2($serviceId: String!, $environmentId: String!) {
+			serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
 		}`,
 		map[string]any{
 			"serviceId":     serviceID,
@@ -269,17 +285,20 @@ func (c *Client) triggerDeploy(serviceName string) (string, error) {
 		return "", fmt.Errorf("deploy service %s: %w", serviceName, err)
 	}
 
-	deploymentID, ok := data["serviceInstanceDeploy"].(string)
+	deploymentID, ok := data["serviceInstanceDeployV2"].(string)
 	if !ok || deploymentID == "" {
-		return "", fmt.Errorf("deploy service %s: no deployment ID returned", serviceName)
+		return "", fmt.Errorf("deploy service %s: no deployment ID returned (response: %v)", serviceName, data)
 	}
 	return deploymentID, nil
 }
 
 // waitForDeployment polls the deployment status until it reaches a terminal
-// state (SUCCESS, FAILED, CRASHED, SKIPPED, REMOVED). It streams runtime
-// logs as they become available. Returns an error if the deploy fails.
-func (c *Client) waitForDeployment(deploymentID string) error {
+// state (SUCCESS, FAILED, CRASHED, SKIPPED). It streams runtime logs as they
+// become available. Returns an error if the deploy fails.
+//
+// If the initial deployment is REMOVED (superseded by a newer one), it fetches
+// the latest deployment for the service and polls that instead.
+func (c *Client) waitForDeployment(serviceName, deploymentID string) error {
 	const pollInterval = 5 * time.Second
 
 	// Terminal statuses — once reached, stop polling.
@@ -288,11 +307,11 @@ func (c *Client) waitForDeployment(deploymentID string) error {
 		"FAILED":  true,
 		"CRASHED": true,
 		"SKIPPED": true,
-		"REMOVED": true,
 	}
 
 	var lastStatus string
 	logsFetched := 0
+	currentID := deploymentID
 
 	for {
 		data, err := c.graphqlRequest(
@@ -302,7 +321,7 @@ func (c *Client) waitForDeployment(deploymentID string) error {
 					status
 				}
 			}`,
-			map[string]any{"id": deploymentID},
+			map[string]any{"id": currentID},
 		)
 		if err != nil {
 			return fmt.Errorf("fetch deployment status: %w", err)
@@ -314,6 +333,25 @@ func (c *Client) waitForDeployment(deploymentID string) error {
 		}
 
 		status, _ := deployment["status"].(string)
+
+		// If REMOVED, the deployment was superseded — fetch the latest one.
+		if status == "REMOVED" {
+			latestID, err := c.getLatestDeploymentID(serviceName)
+			if err != nil {
+				return fmt.Errorf("deployment %s was REMOVED and no active deployment found: %w", currentID, err)
+			}
+			if latestID == currentID {
+				// Still the same — wait and retry, the new one may not exist yet.
+				time.Sleep(pollInterval)
+				continue
+			}
+			currentID = latestID
+			lastStatus = ""
+			logsFetched = 0
+			fmt.Printf("=== Switched to latest deployment: %s ===\n", currentID)
+			continue
+		}
+
 		if status != lastStatus {
 			fmt.Printf("=== Deployment status: %s ===\n", status)
 			lastStatus = status
@@ -321,7 +359,7 @@ func (c *Client) waitForDeployment(deploymentID string) error {
 
 		// Fetch and print any new runtime logs once the deployment is running.
 		if status == "DEPLOYING" || status == "SUCCESS" || status == "FAILED" || status == "CRASHED" {
-			logs, err := c.getDeploymentLogs(deploymentID, logsFetched)
+			logs, err := c.getDeploymentLogs(currentID, logsFetched)
 			if err == nil && len(logs) > logsFetched {
 				for _, l := range logs[logsFetched:] {
 					fmt.Printf("[%s] %s\n", l.severity, l.message)
@@ -333,19 +371,78 @@ func (c *Client) waitForDeployment(deploymentID string) error {
 		if terminal[status] {
 			if status != "SUCCESS" {
 				// Fetch any remaining logs on failure.
-				logs, err := c.getDeploymentLogs(deploymentID, logsFetched)
+				logs, err := c.getDeploymentLogs(currentID, logsFetched)
 				if err == nil && len(logs) > logsFetched {
 					for _, l := range logs[logsFetched:] {
 						fmt.Printf("[%s] %s\n", l.severity, l.message)
 					}
 				}
-				return fmt.Errorf("deployment %s ended with status %s", deploymentID, status)
+				return fmt.Errorf("deployment %s ended with status %s", currentID, status)
 			}
 			return nil
 		}
 
 		time.Sleep(pollInterval)
 	}
+}
+
+// getLatestDeploymentID fetches the most recent deployment ID for a service.
+func (c *Client) getLatestDeploymentID(serviceName string) (string, error) {
+	serviceID, err := c.resolveServiceID(serviceName)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := c.graphqlRequest(
+		`query deployments($input: DeploymentListInput!, $first: Int) {
+			deployments(input: $input, first: $first) {
+				edges {
+					node {
+						id
+						status
+						createdAt
+					}
+				}
+			}
+		}`,
+		map[string]any{
+			"input": map[string]any{
+				"projectId":     c.projectID,
+				"serviceId":     serviceID,
+				"environmentId": c.environmentID,
+			},
+			"first": 1,
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("fetch deployments: %w", err)
+	}
+
+	deployments, ok := data["deployments"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("deployments not found in response")
+	}
+
+	edges, ok := deployments["edges"].([]any)
+	if !ok || len(edges) == 0 {
+		return "", fmt.Errorf("no deployments found")
+	}
+
+	edge, ok := edges[0].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("invalid deployment edge")
+	}
+
+	node, ok := edge["node"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("invalid deployment node")
+	}
+
+	id, _ := node["id"].(string)
+	if id == "" {
+		return "", fmt.Errorf("deployment has empty ID")
+	}
+	return id, nil
 }
 
 type deploymentLog struct {
