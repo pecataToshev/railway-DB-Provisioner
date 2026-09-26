@@ -6,9 +6,9 @@ set -e
 # ci-setup does everything:
 #   1. Ensures per-service *_POSTGRES_URL variables exist on the
 #      db-provisioner Railway service (idempotent — only sets missing
-#      or stale ones).
-#   2. Triggers a deploy of the db-provisioner service via the Railway
-#      GraphQL API so it picks up any new/updated variables.
+#      or stale ones) via the Railway GraphQL API.
+#   2. Deploys the db-provisioner service via `railway up` — uploads
+#      local files (Dockerfile + services.txt) to Railway for building.
 #
 # Required env: RAILWAY_TOKEN, RAILWAY_SERVICE_NAME
 # Optional env:

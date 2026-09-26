@@ -168,25 +168,15 @@ func main() {
 
 	slog.Info("ci-setup complete", "set", set, "updated", updated, "skipped", skipped)
 
-	// Deploy the provisioner service so it picks up any new/updated variables.
-	// DEPLOY_WAIT controls whether to block until the deploy finishes (default)
-	// or trigger and exit immediately.
-	deployWait := os.Getenv("DEPLOY_WAIT")
-	if deployWait == "" || strings.EqualFold(deployWait, "true") || deployWait == "1" {
-		slog.Info("deploying provisioner service (waiting for completion)", "service", serviceName)
-		if err := client.Deploy(serviceName); err != nil {
-			slog.Error("deploy failed", "service", serviceName, "error", err)
-			os.Exit(1)
-		}
-		slog.Info("deploy completed successfully")
-	} else {
-		slog.Info("triggering deploy (detached)", "service", serviceName)
-		if err := client.DeployDetached(serviceName); err != nil {
-			slog.Error("failed to trigger deploy", "service", serviceName, "error", err)
-			os.Exit(1)
-		}
-		slog.Info("deploy triggered")
+	// Deploy the provisioner service via `railway up` — uploads local files
+	// (Dockerfile + services.txt) to Railway for building. Blocks until the
+	// deploy finishes and streams output directly to the CI console.
+	slog.Info("deploying provisioner service via railway up", "service", serviceName)
+	if err := client.Deploy(serviceName); err != nil {
+		slog.Error("deploy failed", "service", serviceName, "error", err)
+		os.Exit(1)
 	}
+	slog.Info("deploy completed successfully")
 }
 
 // hasCurrentHostRef checks whether a connection URL already contains the

@@ -32,15 +32,15 @@ CI pipeline                                Railway project
 │    ensure *_URL vars    │               │   env: QUIZZER_POSTGRES_URL      │
 │    (generate passwords) │               │   env: AUTH_POSTGRES_URL         │
 │                         │──(2) deploy──▶│   ...                            │
-│  deploy:                │               │                                  │
-│    deploy provisioner   │               │ provisioner binary runs:         │
-│                         │               │   → create role + database       │
+│  railway up:            │               │                                  │
+│    upload local files   │               │ provisioner binary runs:         │
+│    deploy provisioner   │               │   → create role + database       │
 │                         │               │   → print reference URLs         │
 └─────────────────────────┘               └──────────────────────────────────┘
 ```
 
 1. **`ci-setup`** resolves the project and environment IDs from the Railway token, fetches the provisioner service's existing variables (unrendered — references like `${{...}}` are returned as-is), reads `POSTGRES_SERVICE_NAME` to build Railway variable references for host:port, and for each service in `services.txt` ensures `<PREFIX>_POSTGRES_URL` exists with the correct references (generating a password and building the connection string if missing or stale).
-2. **Deploy** triggers a deployment of the provisioner service via the Railway GraphQL API. The `provisioner` binary reads all `*_POSTGRES_URL` variables, connects to Postgres via `POSTGRES_URL` (superuser), and creates the corresponding roles + databases.
+2. **`railway up`** uploads local files (Dockerfile + services.txt) to Railway and deploys the provisioner service. The `provisioner` binary reads all `*_POSTGRES_URL` variables, connects to Postgres via `POSTGRES_URL` (superuser), and creates the corresponding roles + databases.
 
 ## How it works
 
@@ -124,7 +124,7 @@ The provisioner uses `RAILWAY_SERVICE_NAME` to generate Railway variable referen
 
 In **your** consuming repo, add a CI workflow that runs the CI Docker image against your `services.txt`. See [`env.ci.example`](https://github.com/pecataToshev/railway-DB-Provisioner/blob/main/env.ci.example) for the required environment variables.
 
-By default, `ci-setup` triggers a deploy and **waits for it to complete**, streaming status changes and runtime logs to the CI output. If the deploy fails, the CI step fails. Set `DEPLOY_WAIT=false` to trigger the deploy and exit immediately (fire-and-forget) instead.
+`ci-setup` deploys via `railway up` — it uploads local files (Dockerfile + services.txt) to Railway for building. This blocks until the deploy finishes and streams the output directly to the CI console. If the deploy fails, the CI step fails.
 
 Example consumer repos are provided in the [`examples/`](https://github.com/pecataToshev/railway-DB-Provisioner/tree/main/examples) directory — each contains a complete setup with `services.txt`, `Dockerfile`, CI config, and a README:
 
@@ -169,7 +169,7 @@ The CI image bundles:
 
 - `ci-setup` Go binary (var provisioning logic)
 - Railway CLI (API calls)
-- `ci-entrypoint.sh` (orchestrates: ci-setup → deploy)
+- `ci-entrypoint.sh` (orchestrates: ci-setup → railway up)
 
 ---
 
@@ -210,7 +210,7 @@ railway-DB-Provisioner/
 ├── services.example.txt         # Example service declarations (copy to services.txt)
 ├── env.provisioner.example      # Env vars for the provisioner service (Railway)
 ├── env.ci.example               # Env vars for the CI pipeline (GitHub Actions / GitLab CI)
-├── ci-entrypoint.sh             # CI entrypoint (ci-setup + deploy)
+├── ci-entrypoint.sh             # CI entrypoint (ci-setup + railway up)
 ├── .dockerignore
 ├── .gitignore
 ├── CONTRIBUTING.md
